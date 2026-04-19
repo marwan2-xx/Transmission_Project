@@ -386,7 +386,7 @@ def main():
 
     do_image = input("\n[Bonus] Transmit an image? (y/n): ").strip().lower()
     if do_image == 'y':
-        img_path = input("  Enter path to image: ").strip()
+        img_path = input("  Enter path to image: ").strip().strip('"')
         transmit_image(img_path, TRANSMIT_POWER, NOISE_POWER, c_i_linear)
 
 
