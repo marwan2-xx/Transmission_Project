@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-trunk_BW = eval(input("Enter the trunk bandwidth : "))
 from math import log2, ceil
 
 # ─────────────────────────────────────────────
