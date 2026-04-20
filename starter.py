@@ -2,9 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 from math import log2, ceil
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, scrolledtext
 
 # ─────────────────────────────────────────────
-#  CONSTANTS (fixed by project spec)
+#  CONSTANTS
 # ─────────────────────────────────────────────
 TRANSMIT_POWER = 0.1      # 100 mW
 NOISE_POWER    = 0.0001   # 0.1 mW
@@ -13,62 +15,14 @@ NOISE_POWER    = 0.0001   # 0.1 mW
 #  VALID N LIST
 # ─────────────────────────────────────────────
 def is_valid_N(N):
-    """Check if N can be written as i² + i*j + j²  (i >= j >= 0)."""
     for i in range(0, N + 1):
         for j in range(0, i + 1):
             val = i*i + i*j + j*j
-            if val == N:
-                return True
-            if val > N:
-                break
+            if val == N:  return True
+            if val > N:   break
     return False
 
-VALID_N_LIST = [N for N in range(3, 50) if is_valid_N(N)]
-
-# ─────────────────────────────────────────────
-#  INPUT VALIDATION
-# ─────────────────────────────────────────────
-def validate_inputs(length, width, subscriber_density, c_i_dB,
-                    user_session_time, requests_per_second,
-                    trunk_BW, total_BW, blocking_prob):
-    errors = []
-
-    if length <= 0:
-        errors.append("Area length must be positive.")
-    if width <= 0:
-        errors.append("Area width must be positive.")
-    if subscriber_density <= 0:
-        errors.append("User density must be positive.")
-    if c_i_dB <= 0:
-        errors.append("Minimum C/I must be a positive dB value.")
-    if user_session_time <= 0:
-        errors.append("Session time must be positive.")
-    if requests_per_second <= 0:
-        errors.append("Requests per second must be positive.")
-    if trunk_BW <= 0:
-        errors.append("Trunk bandwidth must be positive.")
-    if total_BW <= 0:
-        errors.append("Total bandwidth must be positive.")
-    if trunk_BW >= total_BW:
-        errors.append("Trunk bandwidth must be smaller than total bandwidth.")
-    if not (0 < blocking_prob < 1):
-        errors.append("Blocking probability must be between 0 and 1 (e.g. 0.02 for 2%).")
-
-    area_km2   = (length / 1000) * (width / 1000)
-    total_subs = area_km2 * subscriber_density
-    A_total    = total_subs * requests_per_second * user_session_time
-    total_ch   = int(total_BW / trunk_BW)
-    if A_total > total_ch * 10000:
-        errors.append(
-            f"Offered traffic ({A_total:.1f} Erlangs) is extremely high for "
-            f"{total_ch} total channels. Reduce session time or request rate."
-        )
-
-    if errors:
-        print("\n[INPUT ERRORS] Please fix the following:")
-        for idx, e in enumerate(errors, 1):
-            print(f"  {idx}. {e}")
-        raise ValueError(f"{len(errors)} invalid input(s). See details above.")
+VALID_N_LIST = [N for N in range(1, 500) if is_valid_N(N)]
 
 # ─────────────────────────────────────────────
 #  CELLULAR PLANNING
@@ -83,54 +37,20 @@ def get_total_channels(total_BW, trunk_BW):
     return int(total_BW / trunk_BW)
 
 def get_n_for_sectoring(N, sectoring):
-    """
-    Return number of co-channel interferers n based on cluster size N
-    and sectoring type. n is a geometric property of the cluster — it
-    is determined by counting co-sector interferers in the cluster diagram.
-
-    Lookup table built from course slides and Rappaport textbook:
-      - Omni: always n=6 (slide 12)
-      - 120deg: N=3->n=3, N=4->n=2, N=7->n=2 (slides 22-24), others n=2
-      - 60deg:  n=1 for most N, n=2 for some (geometric count)
-      - 180deg: n=3 for most N (half of omni)
-    """
     if sectoring == "Omni (no sectoring)":
         return 6
-
-    # Lookup tables: keys are N values, values are n
     n_table = {
-        "180": {
-             3: 3, 4: 3, 7: 3, 9: 3, 12: 3,
-            13: 3, 16: 3, 19: 3, 21: 3, 25: 3, 27: 3, 28: 3
-        },
-        "120": {
-             3: 3, 4: 2, 7: 2, 9: 2, 12: 2,
-            13: 2, 16: 2, 19: 2, 21: 2, 25: 2, 27: 2, 28: 2
-        },
-        "60": {
-             3: 2, 4: 1, 7: 2, 9: 1, 12: 2,
-            13: 2, 16: 2, 19: 2, 21: 2, 25: 2, 27: 2, 28: 2
-        },
+        "180": {1:3,3:3,4:3,7:3,9:3,12:3,13:3,16:3,19:3,21:3,25:3,27:3,28:3},
+        "120": {1:2,3:3,4:2,7:2,9:2,12:2,13:2,16:2,19:2,21:2,25:2,27:2,28:2},
+        "60":  {1:1,3:2,4:1,7:2,9:1,12:2,13:2,16:2,19:2,21:2,25:2,27:2,28:2},
     }
-    table = n_table.get(sectoring, {})
-    if N in table:
-        return table[N]
-    # Default fallback for N values not in table
+    table    = n_table.get(sectoring, {})
     defaults = {"180": 3, "120": 2, "60": 1}
-    return defaults.get(sectoring, 6)
-
+    return table.get(N, defaults.get(sectoring, 6))
 
 def find_reuse_factor(c_i_linear):
-    """
-    Try all four antenna configurations using C/I = 3N/n.
-    n depends on both N and sectoring type (geometric cluster property).
-    Pick the combination with the smallest valid N.
-    Ties broken by preferring less sectoring (simpler infrastructure).
-    """
     all_options = []
-    best_N      = None
-    best_result = None
-
+    best_N, best_result = None, None
     for sectoring in ["Omni (no sectoring)", "180", "120", "60"]:
         for N in VALID_N_LIST:
             n  = get_n_for_sectoring(N, sectoring)
@@ -138,49 +58,14 @@ def find_reuse_factor(c_i_linear):
             if ci >= c_i_linear:
                 all_options.append((sectoring, n, N, ci))
                 if best_N is None or N < best_N:
-                    best_N      = N
-                    best_result = (N, sectoring, n, ci)
+                    best_N, best_result = N, (N, sectoring, n, ci)
                 break
-
     if best_result:
         return best_result, all_options
     raise ValueError("Could not find a valid N for the given C/I requirement.")
-
-def find_reuse_factor(c_i_linear):
-    """
-    Try all four antenna configurations using C/I = 3N/n.
-    n values per course slides:
-      - Omni : n = 6
-      - 180  : n = 3
-      - 120  : n = 2
-      - 60   : n = 1
-    Pick the combination with the smallest valid N.
-    Ties broken by preferring less sectoring (simpler infrastructure).
-    """
-    all_options = []
-    best_N      = None
-    best_result = None
-
-    for sectoring in ["Omni (no sectoring)", "180", "120", "60"]:
-        for N in VALID_N_LIST:
-            n  = get_n_for_sectoring(N, sectoring)
-            ci = 3 * N / n
-            if ci >= c_i_linear:
-                all_options.append((sectoring, n, N, ci))
-                if best_N is None or N < best_N:
-                    best_N      = N
-                    best_result = (N, sectoring, n, ci)
-                break
-
-    if best_result:
-        return best_result, all_options
-    raise ValueError("Could not find a valid N for the given C/I requirement.")
-
 
 def erlang_b(A, C):
-    """Erlang B formula using Jagerman iterative recursion (overflow-safe)."""
-    if A == 0:
-        return 0.0
+    if A == 0: return 0.0
     B = 1.0
     for k in range(1, int(C) + 1):
         B = (A * B) / (k + A * B)
@@ -189,47 +74,33 @@ def erlang_b(A, C):
 def get_number_of_cells(total_subscribers, user_session_time,
                         requests_per_second, trunk_BW, total_BW,
                         blocking_probability, N):
-    """
-    Find minimum number of cells so that Erlang-B blocking on
-    (channels_per_cell) channels <= blocking_probability.
-    """
     traffic_per_user  = requests_per_second * user_session_time
     A_total           = total_subscribers * traffic_per_user
     total_channels    = get_total_channels(total_BW, trunk_BW)
     channels_per_cell = max(1, int(total_channels // N))
-
-    MAX_CELLS = 10_000_000
-    for num_cells in range(1, MAX_CELLS + 1):
+    for num_cells in range(1, 10_000_001):
         A_per_cell = A_total / num_cells
         if erlang_b(A_per_cell, channels_per_cell) <= blocking_probability:
             return num_cells, channels_per_cell, A_per_cell
-
-    print(f"\n[WARNING] Could not meet blocking probability with {MAX_CELLS:,} cells.")
-    print(f"  Total traffic = {A_total:.1f} Erlangs, channels/cell = {channels_per_cell}")
-    print(f"  Consider increasing total_BW or reducing session time / request rate.")
-    return MAX_CELLS, channels_per_cell, A_total / MAX_CELLS
+    return 10_000_000, channels_per_cell, A_total / 10_000_000
 
 def shannon_capacity(channel_bandwidth_hz, snr_linear):
-    """Shannon capacity in bits/s."""
     return channel_bandwidth_hz * log2(1 + snr_linear)
 
 # ─────────────────────────────────────────────
-#  16-QAM MODULATION / DEMODULATION
+#  16-QAM
 # ─────────────────────────────────────────────
 def get_16qam_constellation():
-    """Standard 16-QAM constellation normalised to unit average power."""
     re = np.array([-3, -1, 1, 3])
     im = np.array([-3, -1, 1, 3])
     const = np.array([complex(r, i) for r in re for i in im])
     return const / np.sqrt(10)
 
 def bits_to_symbols(bits):
-    """Map groups of 4 bits to 16-QAM symbols."""
     constellation = get_16qam_constellation()
     bits = np.asarray(bits, dtype=int)
     pad  = (4 - len(bits) % 4) % 4
-    if pad:
-        bits = np.append(bits, np.zeros(pad, dtype=int))
+    if pad: bits = np.append(bits, np.zeros(pad, dtype=int))
     symbols = []
     for i in range(0, len(bits), 4):
         idx = int(''.join(map(str, bits[i:i+4])), 2)
@@ -237,7 +108,6 @@ def bits_to_symbols(bits):
     return np.array(symbols)
 
 def transmit(symbols, tx_power, noise_power, c_i_linear):
-    """Transmit through AWGN + interference channel."""
     transmitted        = symbols * np.sqrt(tx_power)
     interference_power = tx_power / c_i_linear if c_i_linear > 0 else 0
     total_noise_var    = noise_power + interference_power
@@ -247,7 +117,6 @@ def transmit(symbols, tx_power, noise_power, c_i_linear):
     return transmitted + noise
 
 def demodulate(received_symbols, tx_power):
-    """Nearest-neighbour hard decision demodulation."""
     constellation = get_16qam_constellation() * np.sqrt(tx_power)
     received_bits = []
     for sym in received_symbols:
@@ -267,18 +136,14 @@ def generate_bitStream():
 # ─────────────────────────────────────────────
 #  BER PLOTS
 # ─────────────────────────────────────────────
-def plot_ber_vs_tx_power(c_i_linear, noise_power, num_bits=10000):
-    """BER vs Transmit Power (fixed noise power)."""
+def plot_ber_vs_tx_power(c_i_linear, noise_power):
     tx_powers = np.logspace(-3, 1, 25)
-    bers      = []
+    bers = []
     for p in tx_powers:
-        bits     = generate_bitStream()
-        symbols  = bits_to_symbols(bits)
-        received = transmit(symbols, p, noise_power, c_i_linear)
-        rx_bits  = demodulate(received, p)
-        ber, _   = compute_BER(bits, rx_bits)
+        bits = generate_bitStream()
+        rx   = transmit(bits_to_symbols(bits), p, noise_power, c_i_linear)
+        ber, _ = compute_BER(bits, demodulate(rx, p))
         bers.append(max(ber, 1e-6))
-
     plt.figure(figsize=(8, 5))
     plt.semilogy(tx_powers * 1000, bers, marker='o', color='steelblue')
     plt.xlabel("Transmit Power (mW)")
@@ -288,18 +153,14 @@ def plot_ber_vs_tx_power(c_i_linear, noise_power, num_bits=10000):
     plt.tight_layout()
     plt.show()
 
-def plot_ber_vs_noise_power(c_i_linear, tx_power, num_bits=10000):
-    """BER vs Noise Power (fixed transmit power)."""
+def plot_ber_vs_noise_power(c_i_linear, tx_power):
     noise_powers = np.logspace(-5, 0, 25)
-    bers         = []
+    bers = []
     for np_ in noise_powers:
-        bits     = generate_bitStream()
-        symbols  = bits_to_symbols(bits)
-        received = transmit(symbols, tx_power, np_, c_i_linear)
-        rx_bits  = demodulate(received, tx_power)
-        ber, _   = compute_BER(bits, rx_bits)
+        bits = generate_bitStream()
+        rx   = transmit(bits_to_symbols(bits), tx_power, np_, c_i_linear)
+        ber, _ = compute_BER(bits, demodulate(rx, tx_power))
         bers.append(max(ber, 1e-6))
-
     plt.figure(figsize=(8, 5))
     plt.semilogy(noise_powers * 1000, bers, marker='s', color='orange')
     plt.xlabel("Noise Power (mW)")
@@ -313,150 +174,334 @@ def plot_ber_vs_noise_power(c_i_linear, tx_power, num_bits=10000):
 #  BONUS: IMAGE TRANSMISSION
 # ─────────────────────────────────────────────
 def transmit_image(image_path, tx_power, noise_power, c_i_linear):
-    """Transmit a 256x256 image through the 16-QAM channel."""
     from PIL import Image
-
     img       = Image.open(image_path).convert("L").resize((256, 256))
     img_array = np.array(img, dtype=np.uint8)
     bits      = np.unpackbits(img_array.flatten())
-
-    symbols  = bits_to_symbols(bits)
-    received = transmit(symbols, tx_power, noise_power, c_i_linear)
-    rx_bits  = demodulate(received, tx_power)
-
-    rx_bits  = rx_bits[:len(bits)].astype(np.uint8)
-    rx_array = np.packbits(rx_bits).reshape(256, 256)
-
+    symbols   = bits_to_symbols(bits)
+    received  = transmit(symbols, tx_power, noise_power, c_i_linear)
+    rx_bits   = demodulate(received, tx_power)
+    rx_bits   = rx_bits[:len(bits)].astype(np.uint8)
+    rx_array  = np.packbits(rx_bits).reshape(256, 256)
     ber, errors = compute_BER(bits, rx_bits)
-    print(f"\n[Image BER] {ber:.4f}  ({errors} bit errors out of {len(bits)})")
-
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     axes[0].imshow(img_array, cmap="gray", vmin=0, vmax=255)
-    axes[0].set_title("Original Image")
-    axes[0].axis("off")
-    axes[1].imshow(rx_array, cmap="gray", vmin=0, vmax=255)
-    axes[1].set_title(f"Received Image (BER={ber:.4f})")
-    axes[1].axis("off")
+    axes[0].set_title("Original Image"); axes[0].axis("off")
+    axes[1].imshow(rx_array,  cmap="gray", vmin=0, vmax=255)
+    axes[1].set_title(f"Received Image (BER={ber:.4f})"); axes[1].axis("off")
     plt.tight_layout()
     plt.show()
+    return ber, errors
 
 # ─────────────────────────────────────────────
-#  MAIN
+#  GUI
 # ─────────────────────────────────────────────
-def get_float_input(prompt, condition=lambda x: x > 0, error_msg="Value must be positive."):
-    """Keep asking until the user enters a valid non-empty float that passes condition."""
-    while True:
+class App:
+    def __init__(self, root):
+        self.root = root
+        root.title("NETW601 — Cellular Network Planner + 16-QAM Simulator")
+        root.resizable(True, True)
+
+        # ── Style ────────────────────────────────
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TLabel",     font=("Segoe UI", 10))
+        style.configure("TButton",    font=("Segoe UI", 10), padding=6)
+        style.configure("TEntry",     font=("Segoe UI", 10), padding=4)
+        style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
+        style.configure("Title.TLabel",  font=("Segoe UI", 14, "bold"))
+        style.configure("Green.TLabel",  font=("Segoe UI", 10), foreground="#1a7a1a")
+        style.configure("Red.TLabel",    font=("Segoe UI", 10), foreground="#cc0000")
+
+        # ── Main layout ──────────────────────────
+        main = ttk.Frame(root, padding=16)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main, text="NETW601 — Cellular Network Planner + 16-QAM Simulator",
+                  style="Title.TLabel").grid(row=0, column=0, columnspan=4,
+                  pady=(0, 16), sticky="w")
+
+        # ── Input panel ──────────────────────────
+        inp = ttk.LabelFrame(main, text="Inputs", padding=12)
+        inp.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
+
+        fields = [
+            ("Length (m)",                  "length"),
+            ("Width (m)",                   "width"),
+            ("User density (users/km²)",    "density"),
+            ("Min C/I (dB)",                "ci"),
+            ("Session time (s)",            "session"),
+            ("Requests per second",         "rps"),
+            ("Trunk bandwidth (Hz)",        "trunk"),
+            ("Total bandwidth (Hz)",        "total"),
+            ("Blocking probability",        "blocking"),
+        ]
+        self.entries = {}
+        self.err_labels = {}
+        defaults = ["2000","2000","200","18","5","0.01","200000","5000000","0.02"]
+
+        for row, ((label, key), default) in enumerate(zip(fields, defaults)):
+            ttk.Label(inp, text=label).grid(row=row, column=0, sticky="w", pady=3, padx=(0,8))
+            e = ttk.Entry(inp, width=18)
+            e.insert(0, default)
+            e.grid(row=row, column=1, sticky="ew", pady=3)
+            e.bind("<Return>", lambda ev: self.run())
+            self.entries[key] = e
+            lbl = ttk.Label(inp, text="", style="Red.TLabel")
+            lbl.grid(row=row, column=2, sticky="w", padx=(6,0))
+            self.err_labels[key] = lbl
+
+        inp.columnconfigure(1, weight=1)
+
+        # ── Buttons ──────────────────────────────
+        btn_frame = ttk.Frame(inp)
+        btn_frame.grid(row=len(fields), column=0, columnspan=3, pady=(12, 0), sticky="ew")
+
+        ttk.Button(btn_frame, text="Run Simulation",
+                   command=self.run).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        ttk.Button(btn_frame, text="Plot BER vs TX Power",
+                   command=self.plot_tx).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        ttk.Button(btn_frame, text="Plot BER vs Noise",
+                   command=self.plot_noise).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ttk.Button(inp, text="Transmit Image (Bonus)",
+                   command=self.run_image).grid(row=len(fields)+1, column=0,
+                   columnspan=3, pady=(6, 0), sticky="ew")
+
+        # ── Results panel ────────────────────────
+        res = ttk.LabelFrame(main, text="Results", padding=12)
+        res.grid(row=1, column=1, sticky="nsew")
+        main.columnconfigure(1, weight=1)
+        main.rowconfigure(1, weight=1)
+
+        # Metric cards row
+        cards = ttk.Frame(res)
+        cards.pack(fill=tk.X, pady=(0, 12))
+
+        self.card_vars = {}
+        card_defs = [
+            ("Min Cells",    "cells"),
+            ("Sectoring",    "sect"),
+            ("Capacity",     "cap"),
+            ("BER",          "ber"),
+            ("Ch/Cell",      "chpc"),
+            ("Traffic/Cell", "traf"),
+        ]
+        for col, (title, key) in enumerate(card_defs):
+            f = ttk.Frame(cards, relief="groove", padding=8)
+            f.grid(row=0, column=col, padx=4, sticky="nsew")
+            cards.columnconfigure(col, weight=1)
+            ttk.Label(f, text=title, font=("Segoe UI", 9),
+                      foreground="#666").pack()
+            var = tk.StringVar(value="—")
+            ttk.Label(f, textvariable=var,
+                      font=("Segoe UI", 13, "bold")).pack()
+            self.card_vars[key] = var
+
+        # Sectoring table
+        ttk.Label(res, text="Sectoring Analysis  (C/I = 3N/n)",
+                  style="Header.TLabel").pack(anchor="w", pady=(0, 4))
+
+        tbl_frame = ttk.Frame(res)
+        tbl_frame.pack(fill=tk.X, pady=(0, 10))
+
+        cols = ("Type", "n", "N", "C/I achieved")
+        self.tree = ttk.Treeview(tbl_frame, columns=cols, show="headings", height=4)
+        for c in cols:
+            self.tree.heading(c, text=c)
+            self.tree.column(c, width=120, anchor="center")
+        self.tree.tag_configure("chosen", background="#d4edda", foreground="#155724")
+        self.tree.pack(fill=tk.X)
+
+        # Bit streams
+        ttk.Label(res, text="Transmitted bit stream (first 40 bits)",
+                  style="Header.TLabel").pack(anchor="w", pady=(4,2))
+        self.tx_text = scrolledtext.ScrolledText(res, height=2, font=("Courier", 10),
+                                                  state="disabled", wrap=tk.WORD)
+        self.tx_text.pack(fill=tk.X)
+
+        ttk.Label(res, text="Received bit stream (first 40 bits)",
+                  style="Header.TLabel").pack(anchor="w", pady=(8,2))
+        self.rx_text = scrolledtext.ScrolledText(res, height=2, font=("Courier", 10),
+                                                  state="disabled", wrap=tk.WORD)
+        self.rx_text.pack(fill=tk.X)
+
+        # Additional info
+        ttk.Label(res, text="Additional Info",
+                  style="Header.TLabel").pack(anchor="w", pady=(10,2))
+        self.info_text = scrolledtext.ScrolledText(res, height=7, font=("Courier", 10),
+                                                    state="disabled", wrap=tk.WORD)
+        self.info_text.pack(fill=tk.BOTH, expand=True)
+
+        # Status bar
+        self.status = tk.StringVar(value="Ready.")
+        ttk.Label(main, textvariable=self.status,
+                  font=("Segoe UI", 9), foreground="#555").grid(
+                  row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        # Store last computed c_i_linear for plot buttons
+        self.last_ci = None
+
+    # ── Helpers ──────────────────────────────────
+    def get_val(self, key):
+        return float(self.entries[key].get().strip())
+
+    def clear_errors(self):
+        for lbl in self.err_labels.values():
+            lbl.config(text="")
+
+    def set_err(self, key, msg):
+        self.err_labels[key].config(text=msg)
+
+    def set_text(self, widget, text):
+        widget.config(state="normal")
+        widget.delete("1.0", tk.END)
+        widget.insert(tk.END, text)
+        widget.config(state="disabled")
+
+    def validate(self):
+        self.clear_errors()
+        ok = True
+        def err(k, m): self.set_err(k, m); nonlocal ok; ok = False
+
+        try: l = self.get_val("length");    (err("length","Must be > 0") if l<=0 else None)
+        except: err("length", "Invalid")
+        try: w = self.get_val("width");     (err("width","Must be > 0") if w<=0 else None)
+        except: err("width", "Invalid")
+        try: d = self.get_val("density");   (err("density","Must be > 0") if d<=0 else None)
+        except: err("density", "Invalid")
+        try: ci = self.get_val("ci");       (err("ci","Must be > 0") if ci<=0 else None)
+        except: err("ci", "Invalid")
+        try: s = self.get_val("session");   (err("session","Must be > 0") if s<=0 else None)
+        except: err("session", "Invalid")
+        try: r = self.get_val("rps");       (err("rps","Must be > 0") if r<=0 else None)
+        except: err("rps", "Invalid")
+        try: tr = self.get_val("trunk");    (err("trunk","Must be > 0") if tr<=0 else None)
+        except: err("trunk", "Invalid"); tr = None
         try:
-            raw = input(prompt)
-            if raw.strip() == "":
-                print("  [ERROR] Input cannot be empty. Please enter a number.")
-                continue
-            value = float(raw)
-            if not condition(value):
-                print(f"  [ERROR] {error_msg}")
-            else:
-                return value
-        except ValueError:
-            print("  [ERROR] Invalid input. Please enter a number.")
+            tot = self.get_val("total")
+            if tr and tot <= tr: err("total", f"Must be > trunk ({tr:.0f})")
+            elif tot <= 0:       err("total", "Must be > 0")
+        except: err("total", "Invalid")
+        try:
+            bp = self.get_val("blocking")
+            if not (0 < bp < 1): err("blocking", "Must be 0 < p < 1")
+        except: err("blocking", "Invalid")
+        return ok
 
+    # ── Run ──────────────────────────────────────
+    def run(self):
+        if not self.validate(): return
+        self.status.set("Running simulation...")
+        self.root.update()
+        try:
+            length   = self.get_val("length")
+            width    = self.get_val("width")
+            density  = self.get_val("density")
+            ci_dB    = self.get_val("ci")
+            session  = self.get_val("session")
+            rps      = self.get_val("rps")
+            trunk    = self.get_val("trunk")
+            total    = self.get_val("total")
+            blocking = self.get_val("blocking")
 
-def main():
-    print("=" * 60)
-    print("  NETW 601 - Cellular Network Planner + 16-QAM Simulator")
-    print("=" * 60)
+            ci_lin     = 10 ** (ci_dB / 10)
+            self.last_ci = ci_lin
+            area_km2   = get_area_km2(length, width)
+            total_subs = get_total_subscribers(area_km2, density)
+            total_ch   = get_total_channels(total, trunk)
 
-    length             = get_float_input("\nEnter the length (meters)                        : ")
-    width              = get_float_input("Enter the width (meters)                          : ")
-    subscriber_density = get_float_input("Enter users density (users/km2)                   : ")
-    c_i_dB             = get_float_input("Enter the min signal to interference ratio (dB)   : ")
-    user_session_time  = get_float_input("Enter average session time per user (seconds)     : ")
-    requests_per_second= get_float_input("Enter the average session requests per second     : ")
-    trunk_BW           = get_float_input("Enter the trunk bandwidth (Hz)                    : ")
-    total_BW           = get_float_input(
-        "Enter the total bandwidth (Hz)                    : ",
-        condition=lambda x: x > trunk_BW,
-        error_msg=f"Total bandwidth must be greater than trunk bandwidth ({trunk_BW} Hz)."
-    )
-    blocking_prob      = get_float_input(
-        "Enter the blocking probability (e.g. 0.02)        : ",
-        condition=lambda x: 0 < x < 1,
-        error_msg="Blocking probability must be between 0 and 1 (e.g. 0.02 for 2%)."
-    )
+            (N, sect, n_int, ci_ach), all_opts = find_reuse_factor(ci_lin)
+            num_cells, ch_pc, A_pc = get_number_of_cells(
+                total_subs, session, rps, trunk, total, blocking, N)
+            cap = shannon_capacity(trunk, ci_lin)
 
-    # Traffic sanity check
-    area_km2   = (length / 1000) * (width / 1000)
-    total_subs = area_km2 * subscriber_density
-    A_total    = total_subs * requests_per_second * user_session_time
-    total_ch   = int(total_BW / trunk_BW)
-    if A_total > total_ch * 10000:
-        print(f"\n  [WARNING] Offered traffic ({A_total:.1f} Erlangs) is extremely high "
-              f"for {total_ch} total channels.")
-        print("  Consider reducing session time or request rate.\n")
+            bits    = generate_bitStream()
+            syms    = bits_to_symbols(bits)
+            rx_syms = transmit(syms, TRANSMIT_POWER, NOISE_POWER, ci_lin)
+            rx_bits = demodulate(rx_syms, TRANSMIT_POWER)
+            ber, errors = compute_BER(bits, rx_bits)
 
-    c_i_linear = 10 ** (c_i_dB / 10)
+            # Cards
+            self.card_vars["cells"].set(f"{num_cells:,}")
+            self.card_vars["sect"].set(sect)
+            self.card_vars["cap"].set(f"{cap/1e3:.1f} kbps")
+            self.card_vars["ber"].set(f"{ber*100:.3f}%")
+            self.card_vars["chpc"].set(str(ch_pc))
+            self.card_vars["traf"].set(f"{A_pc:.4f} E")
 
-    area_km2   = get_area_km2(length, width)
-    total_subs = get_total_subscribers(area_km2, subscriber_density)
-    total_ch   = get_total_channels(total_BW, trunk_BW)
+            # Sectoring table
+            for row in self.tree.get_children():
+                self.tree.delete(row)
+            for s_label, s_n, s_N, s_ci in all_opts:
+                chosen = (s_N == N and s_label == sect)
+                tag    = ("chosen",) if chosen else ()
+                mark   = " ✓" if chosen else ""
+                self.tree.insert("", tk.END, values=(
+                    s_label + mark, s_n, s_N,
+                    f"{10*math.log10(s_ci):.2f} dB"), tags=tag)
 
-    (N, sectoring, n_interferers, ci_achieved), all_options = find_reuse_factor(c_i_linear)
+            # Bit streams
+            self.set_text(self.tx_text, str(bits[:40].tolist()))
+            self.set_text(self.rx_text, str(rx_bits[:40].tolist()))
 
-    num_cells, ch_per_cell, A_per_cell = get_number_of_cells(
-        total_subs, user_session_time, requests_per_second,
-        trunk_BW, total_BW, blocking_prob, N
-    )
+            # Additional info
+            info = (
+                f"  Area                : {area_km2:.4f} km²\n"
+                f"  Total subscribers   : {total_subs:.0f}\n"
+                f"  Total channels      : {total_ch}\n"
+                f"  Reuse factor N      : {N}\n"
+                f"  Co-channel interf n : {n_int}\n"
+                f"  Achieved C/I        : {10*math.log10(ci_ach):.2f} dB\n"
+                f"  Bit errors          : {errors} / {len(bits)}\n"
+            )
+            self.set_text(self.info_text, info)
+            self.status.set(f"Done. BER = {ber*100:.3f}%,  cells = {num_cells:,}")
 
-    capacity_bps = shannon_capacity(trunk_BW, c_i_linear)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self.status.set("Error — see message box.")
 
-    bit_stream  = generate_bitStream()
-    symbols     = bits_to_symbols(bit_stream)
-    received    = transmit(symbols, TRANSMIT_POWER, NOISE_POWER, c_i_linear)
-    rx_bits     = demodulate(received, TRANSMIT_POWER)
-    ber, errors = compute_BER(bit_stream, rx_bits)
+    def plot_tx(self):
+        if self.last_ci is None:
+            messagebox.showinfo("Info", "Run the simulation first.")
+            return
+        self.status.set("Generating BER vs TX power plot...")
+        self.root.update()
+        plot_ber_vs_tx_power(self.last_ci, NOISE_POWER)
+        self.status.set("Plot done.")
 
-    print("\n" + "=" * 60)
-    print("  RESULTS")
-    print("=" * 60)
-    print(f"  1. Minimum number of cells    : {num_cells}")
-    print(f"  2. Sectoring type             : {sectoring}  (chosen — smallest N)")
-    print()
-    print("     All configurations evaluated (C/I = 3N/n):")
-    print(f"     {'Type':<22} {'n':>3}  {'N':>4}  {'C/I achieved':>14}")
-    print(f"     {'-'*48}")
-    for s_label, s_n, s_N, s_ci in all_options:
-        marker = " <-- chosen" if s_N == N and s_label == sectoring else ""
-        print(f"     {s_label:<22} {s_n:>3}  {s_N:>4}  {10*math.log10(s_ci):>11.2f} dB{marker}")
-    print(f"  3. Shannon capacity (per ch)  : {capacity_bps/1e3:.2f} kbps")
-    print()
-    print(f"  4. Received bit stream (first 40 bits):")
-    print(f"     {rx_bits[:40].tolist()}")
-    print()
-    print(f"  5. BER                        : {ber:.4f}  ({ber*100:.2f}%)")
-    print(f"     Bit errors                 : {errors} / {len(bit_stream)}")
-    print("=" * 60)
-    print()
-    print("  [ Additional Info ]")
-    print(f"  Area                          : {area_km2:.4f} km2")
-    print(f"  Total subscribers             : {total_subs:.0f}")
-    print(f"  Total channels available      : {total_ch}")
-    print(f"  Frequency reuse factor  N     : {N}")
-    print(f"  Co-channel interferers  n     : {n_interferers}")
-    print(f"  Achieved C/I                  : {10*math.log10(ci_achieved):.2f} dB")
-    print(f"  Channels per cell             : {ch_per_cell}")
-    print(f"  Offered traffic per cell      : {A_per_cell:.4f} Erlangs")
-    print(f"  Transmitted bit stream (first 40 bits):")
-    print(f"     {bit_stream[:40].tolist()}")
-    print("=" * 60)
+    def plot_noise(self):
+        if self.last_ci is None:
+            messagebox.showinfo("Info", "Run the simulation first.")
+            return
+        self.status.set("Generating BER vs noise power plot...")
+        self.root.update()
+        plot_ber_vs_noise_power(self.last_ci, TRANSMIT_POWER)
+        self.status.set("Plot done.")
 
-    print("\nGenerating BER plots...")
-    plot_ber_vs_tx_power(c_i_linear, NOISE_POWER)
-    plot_ber_vs_noise_power(c_i_linear, TRANSMIT_POWER)
+    def run_image(self):
+        if self.last_ci is None:
+            messagebox.showinfo("Info", "Run the simulation first.")
+            return
+        path = filedialog.askopenfilename(
+            title="Select image",
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.bmp *.tif"), ("All", "*.*")]
+        )
+        if not path: return
+        try:
+            self.status.set("Transmitting image...")
+            self.root.update()
+            ber, errors = transmit_image(path, TRANSMIT_POWER, NOISE_POWER, self.last_ci)
+            self.status.set(f"Image done. BER = {ber*100:.3f}%,  errors = {errors}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self.status.set("Image error.")
 
-    do_image = input("\n[Bonus] Transmit an image? (y/n): ").strip().lower()
-    if do_image == 'y':
-        img_path = input("  Enter path to image: ").strip()
-        transmit_image(img_path, TRANSMIT_POWER, NOISE_POWER, c_i_linear)
-
-
+# ─────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    app  = App(root)
+    root.mainloop()
