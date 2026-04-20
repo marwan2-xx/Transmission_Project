@@ -23,7 +23,7 @@ def is_valid_N(N):
                 break
     return False
 
-VALID_N_LIST = [N for N in range(1, 500) if is_valid_N(N)]
+VALID_N_LIST = [N for N in range(3, 50) if is_valid_N(N)]
 
 # ─────────────────────────────────────────────
 #  INPUT VALIDATION
@@ -82,38 +82,100 @@ def get_total_subscribers(area_km2, subscriber_density):
 def get_total_channels(total_BW, trunk_BW):
     return int(total_BW / trunk_BW)
 
+def get_n_for_sectoring(N, sectoring):
+    """
+    Return number of co-channel interferers n based on cluster size N
+    and sectoring type. n is a geometric property of the cluster — it
+    is determined by counting co-sector interferers in the cluster diagram.
+
+    Lookup table built from course slides and Rappaport textbook:
+      - Omni: always n=6 (slide 12)
+      - 120deg: N=3->n=3, N=4->n=2, N=7->n=2 (slides 22-24), others n=2
+      - 60deg:  n=1 for most N, n=2 for some (geometric count)
+      - 180deg: n=3 for most N (half of omni)
+    """
+    if sectoring == "Omni (no sectoring)":
+        return 6
+
+    # Lookup tables: keys are N values, values are n
+    n_table = {
+        "180": {
+             3: 3, 4: 3, 7: 3, 9: 3, 12: 3,
+            13: 3, 16: 3, 19: 3, 21: 3, 25: 3, 27: 3, 28: 3
+        },
+        "120": {
+             3: 3, 4: 2, 7: 2, 9: 2, 12: 2,
+            13: 2, 16: 2, 19: 2, 21: 2, 25: 2, 27: 2, 28: 2
+        },
+        "60": {
+             3: 2, 4: 1, 7: 2, 9: 1, 12: 2,
+            13: 2, 16: 2, 19: 2, 21: 2, 25: 2, 27: 2, 28: 2
+        },
+    }
+    table = n_table.get(sectoring, {})
+    if N in table:
+        return table[N]
+    # Default fallback for N values not in table
+    defaults = {"180": 3, "120": 2, "60": 1}
+    return defaults.get(sectoring, 6)
+
+
 def find_reuse_factor(c_i_linear):
     """
-    Select sectoring type and reuse factor N:
-
-    Decision logic (industry-standard approach):
-      1. Try Omni (n=6, no sectoring). If it satisfies C/I with N <= 7, use it.
-      2. Otherwise try 120-degree sectoring (n=2). If N <= 9, use it.
-      3. Otherwise use 60-degree sectoring (n=1).
-
-    This reflects real practice: use the simplest antenna scheme that works,
-    and only add sectoring when omni requires an impractically large N.
+    Try all four antenna configurations using C/I = 3N/n.
+    n depends on both N and sectoring type (geometric cluster property).
+    Pick the combination with the smallest valid N.
+    Ties broken by preferring less sectoring (simpler infrastructure).
     """
-    # Step 1: try omni
-    for N in VALID_N_LIST:
-        if (3 * N / 6) >= c_i_linear:
-            if N <= 7:
-                return N, 180, 6, 3 * N / 6   # omni is sufficient
-            break
+    all_options = []
+    best_N      = None
+    best_result = None
 
-    # Step 2: try 120-degree sectoring
-    for N in VALID_N_LIST:
-        if (3 * N / 2) >= c_i_linear:
-            if N <= 9:
-                return N, 120, 2, 3 * N / 2
-            break
+    for sectoring in ["Omni (no sectoring)", "180", "120", "60"]:
+        for N in VALID_N_LIST:
+            n  = get_n_for_sectoring(N, sectoring)
+            ci = 3 * N / n
+            if ci >= c_i_linear:
+                all_options.append((sectoring, n, N, ci))
+                if best_N is None or N < best_N:
+                    best_N      = N
+                    best_result = (N, sectoring, n, ci)
+                break
 
-    # Step 3: fall back to 60-degree sectoring
-    for N in VALID_N_LIST:
-        if (3 * N / 1) >= c_i_linear:
-            return N, 60, 1, 3 * N / 1
-
+    if best_result:
+        return best_result, all_options
     raise ValueError("Could not find a valid N for the given C/I requirement.")
+
+def find_reuse_factor(c_i_linear):
+    """
+    Try all four antenna configurations using C/I = 3N/n.
+    n values per course slides:
+      - Omni : n = 6
+      - 180  : n = 3
+      - 120  : n = 2
+      - 60   : n = 1
+    Pick the combination with the smallest valid N.
+    Ties broken by preferring less sectoring (simpler infrastructure).
+    """
+    all_options = []
+    best_N      = None
+    best_result = None
+
+    for sectoring in ["Omni (no sectoring)", "180", "120", "60"]:
+        for N in VALID_N_LIST:
+            n  = get_n_for_sectoring(N, sectoring)
+            ci = 3 * N / n
+            if ci >= c_i_linear:
+                all_options.append((sectoring, n, N, ci))
+                if best_N is None or N < best_N:
+                    best_N      = N
+                    best_result = (N, sectoring, n, ci)
+                break
+
+    if best_result:
+        return best_result, all_options
+    raise ValueError("Could not find a valid N for the given C/I requirement.")
+
 
 def erlang_b(A, C):
     """Erlang B formula using Jagerman iterative recursion (overflow-safe)."""
@@ -337,7 +399,7 @@ def main():
     total_subs = get_total_subscribers(area_km2, subscriber_density)
     total_ch   = get_total_channels(total_BW, trunk_BW)
 
-    N, sectoring, n_interferers, ci_achieved = find_reuse_factor(c_i_linear)
+    (N, sectoring, n_interferers, ci_achieved), all_options = find_reuse_factor(c_i_linear)
 
     num_cells, ch_per_cell, A_per_cell = get_number_of_cells(
         total_subs, user_session_time, requests_per_second,
@@ -356,8 +418,14 @@ def main():
     print("  RESULTS")
     print("=" * 60)
     print(f"  1. Minimum number of cells    : {num_cells}")
-    sect_label = "Omni (no sectoring)" if sectoring == 180 else f"{sectoring} degrees"
-    print(f"  2. Sectoring type             : {sect_label}")
+    print(f"  2. Sectoring type             : {sectoring}  (chosen — smallest N)")
+    print()
+    print("     All configurations evaluated (C/I = 3N/n):")
+    print(f"     {'Type':<22} {'n':>3}  {'N':>4}  {'C/I achieved':>14}")
+    print(f"     {'-'*48}")
+    for s_label, s_n, s_N, s_ci in all_options:
+        marker = " <-- chosen" if s_N == N and s_label == sectoring else ""
+        print(f"     {s_label:<22} {s_n:>3}  {s_N:>4}  {10*math.log10(s_ci):>11.2f} dB{marker}")
     print(f"  3. Shannon capacity (per ch)  : {capacity_bps/1e3:.2f} kbps")
     print()
     print(f"  4. Received bit stream (first 40 bits):")
@@ -386,7 +454,7 @@ def main():
 
     do_image = input("\n[Bonus] Transmit an image? (y/n): ").strip().lower()
     if do_image == 'y':
-        img_path = input("  Enter path to image: ").strip().strip('"')
+        img_path = input("  Enter path to image: ").strip()
         transmit_image(img_path, TRANSMIT_POWER, NOISE_POWER, c_i_linear)
 
 
