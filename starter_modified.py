@@ -287,7 +287,7 @@ class App:
         ]
         self.entries = {}
         self.err_labels = {}
-        defaults = ["2000","2000","200","18","5","0.01","200000","5000000","0.02"]
+        defaults = ["2000","2000","200","10","5","0.01","200000","5000000","0.02"]
 
         for row, ((label, key), default) in enumerate(zip(fields, defaults)):
             ttk.Label(inp, text=label).grid(row=row, column=0, sticky="w", pady=3, padx=(0,8))
