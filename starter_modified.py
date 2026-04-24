@@ -12,8 +12,29 @@ TRANSMIT_POWER = 0.1      # 100 mW
 NOISE_POWER    = 0.0001   # 0.1 mW
 
 # ─────────────────────────────────────────────
-#  VALID N LIST
+#  VALID N LIST & REUSE PARAMETERS
 # ─────────────────────────────────────────────
+def get_reuse_parameters(n_array):
+    """
+    Takes an array of reuse factors (N) and returns a dictionary
+    mapping N to its valid (i, j) tuple based on N = i^2 + ij + j^2.
+    """
+    results = {}
+    for N in n_array:
+        found = False
+        limit = int(N**0.5) + 1
+        for i in range(limit + 1):
+            for j in range(i + 1):   # ensures i >= j
+                if (i**2 + i*j + j**2) == N:
+                    results[N] = (i, j)
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            results[N] = None
+    return results
+
 def is_valid_N(N):
     for i in range(0, N + 1):
         for j in range(0, i + 1):
@@ -22,48 +43,76 @@ def is_valid_N(N):
             if val > N:   break
     return False
 
-VALID_N_LIST = [N for N in range(1, 500) if is_valid_N(N)]
+valid_Ns = [N for N in range(3, 20) if is_valid_N(N)]
+
+# ─────────────────────────────────────────────
+#  REUSE TABLE  (manually mapped per tutorial)
+# ─────────────────────────────────────────────
+# Order of sectoring types matches sectoring_labels index-for-index
+sectoring_labels = ["no sectoring", "60-degrees", "120-degrees", "180-degrees"]
+
+valid_ns = {
+    3:  [6, 2, 3, 2],
+    4:  [6, 1, 2, 2],
+    7:  [6, 3, 2, 2],
+    9:  [6, 3, 2, 2],
+    12: [6, 2, 2, 2],
+    13: [6, 3, 2, 2],
+    16: [6, 3, 2, 2],
+    19: [6, 2, 2, 2],
+}
+
+def find_min_reuse(ns_table: dict, required_CIR: float) -> dict:
+    """
+    For each N in ns_table, iterates over its n values (one per sectoring type)
+    and picks the first n where 3N/n >= required_CIR.
+
+    Returns
+    -------
+    { N: (n, sectoring_label) }  for every N that has at least one match.
+    """
+    results = {}
+    for N, ns in ns_table.items():
+        for n, label in zip(ns, sectoring_labels):
+            if (3 * N) / n >= required_CIR:
+                results[N] = (n, label)
+                break   # first (least-restrictive) match wins
+    return results
+
+def find_reuse_factor(c_i_linear):
+    """
+    Adapter so the GUI (which expects the old return signature) keeps working.
+
+    Calls find_min_reuse, then picks the smallest accepted N as 'best',
+    and returns:
+        best_result : (N, sectoring_label, n, achieved_CIR)
+        all_opts    : [(sectoring_label, n, N, achieved_CIR), ...]  – one row per accepted N
+    """
+    matches = find_min_reuse(valid_ns, c_i_linear)
+    if not matches:
+        raise ValueError("Could not find a valid N for the given C/I requirement.")
+
+    all_opts = [
+        (label, n, N, 3 * N / n)
+        for N, (n, label) in sorted(matches.items())
+    ]
+
+    # Best = smallest N that satisfies the requirement
+    best_N, (best_n, best_label) = min(matches.items(), key=lambda x: x[0])
+    best_result = (best_N, best_label, best_n, 3 * best_N / best_n)
+
+    return best_result, all_opts
 
 # ─────────────────────────────────────────────
 #  CELLULAR PLANNING
 # ─────────────────────────────────────────────
+def get_total_channels(total_BW, trunk_BW):
+    return int(total_BW / trunk_BW)
 def get_area_km2(length, width):
     return (length / 1000) * (width / 1000)
 
 def get_total_subscribers(area_km2, subscriber_density):
     return area_km2 * subscriber_density
-
-def get_total_channels(total_BW, trunk_BW):
-    return int(total_BW / trunk_BW)
-
-def get_n_for_sectoring(N, sectoring):#remove this function 
-    if sectoring == "Omni (no sectoring)":
-        return 6
-    n_table = {
-        "180": {1:3,3:3,4:3,7:3,9:3,12:3,13:3,16:3,19:3,21:3,25:3,27:3,28:3},
-        "120": {1:2,3:3,4:2,7:2,9:2,12:2,13:2,16:2,19:2,21:2,25:2,27:2,28:2},
-        "60":  {1:1,3:2,4:1,7:2,9:1,12:2,13:2,16:2,19:2,21:2,25:2,27:2,28:2},
-    }
-    table    = n_table.get(sectoring, {})
-    defaults = {"180": 3, "120": 2, "60": 1}
-    return table.get(N, defaults.get(sectoring, 6))
-
-def find_reuse_factor(c_i_linear):
-    all_options = []
-    best_N, best_result = None, None
-    for sectoring in ["Omni (no sectoring)", "180", "120", "60"]:
-        for N in VALID_N_LIST:
-            n  = get_n_for_sectoring(N, sectoring)
-            ci = 3 * N / n
-            if ci >= c_i_linear:
-                all_options.append((sectoring, n, N, ci))
-                if best_N is None or N < best_N:
-                    best_N, best_result = N, (N, sectoring, n, ci)
-                break
-    if best_result:
-        return best_result, all_options
-    raise ValueError("Could not find a valid N for the given C/I requirement.")
-
 def erlang_b(A, C):
     if A == 0: return 0.0
     B = 1.0
@@ -505,3 +554,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app  = App(root)
     root.mainloop()
+
