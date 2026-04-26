@@ -52,14 +52,14 @@ valid_Ns = [N for N in range(3, 20) if is_valid_N(N)]
 sectoring_labels = ["no sectoring", "60-degrees", "120-degrees", "180-degrees"]
 
 valid_ns = {
-    3:  [6, 2, 3, 2],
-    4:  [6, 1, 2, 2],
-    7:  [6, 3, 2, 2],
-    9:  [6, 3, 2, 2],
-    12: [6, 2, 2, 2],
-    13: [6, 3, 2, 2],
-    16: [6, 3, 2, 2],
-    19: [6, 2, 2, 2],
+    3:  [6, 2, 3, 4],
+    4:  [6, 1, 2, 3],
+    7:  [6, 1, 2, 3],
+    9:  [6, 1, 2, 3],
+    12: [6, 2, 3, 4],
+    13: [6, 1, 2, 3],
+    16: [6, 1, 2, 3],
+    19: [6, 1, 2, 3],
 }
 
 def find_min_reuse(ns_table: dict, required_CIR: float) -> dict:
