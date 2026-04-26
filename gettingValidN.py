@@ -103,7 +103,7 @@ def find_min_reuse(ns_table: dict, required_CIR: float) -> dict:
 
 # ── Demo ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    result = find_min_reuse(valid_ns, 2.511886432)
+    result = find_min_reuse(valid_ns, 10)
     for N, (n, label) in result.items():
         print(f"N={N}: n={n}, sectoring='{label}', C/I={3*N/n:.4f}")
 
