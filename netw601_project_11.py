@@ -37,7 +37,7 @@ def get_total_channels(total_BW, trunk_BW):
     return int(total_BW / trunk_BW)
 
 # Hex directions (pointy-top axial)
-_HEX_DIRS = [(1,0),(0,1),(-1,1),(-1,0),(0,-1),(1,-1)]
+_HEX_DIRS = [(1,0),(0,1),(-1,1),(-1,0),(0,-1),(1,-1)] 
 
 def _get_ij(N):
     """Return (i,j) pair satisfying i²+ij+j²=N (smallest i,j)."""
@@ -180,8 +180,23 @@ def find_best_reuse(all_options, total_subscribers, user_session_time,
     return best_result, best_cells, best_ch_pc, best_A_pc
 
 
-def shannon_capacity(channel_bandwidth_hz, snr_linear):
-    return channel_bandwidth_hz * log2(1 + snr_linear)
+# def shannon_capacity(channel_bandwidth_hz, snr_linear):
+#     return channel_bandwidth_hz * log2(1 + snr_linear)
+
+# CORRECT shannon capacity according to the project note 
+def shannon_capacity(trunk_bw, transmit_power, noise_power, c_i_linear):
+    """
+    C->Transmit power
+    sigma ->noise power
+    Shannon capacity treating interference as noise (per the project note).
+    SINR = C / (sigma^2 + I),  where I = C / (C/I)_min
+    """
+    I = transmit_power / c_i_linear      # interference power
+    sinr = transmit_power / (math.pow(noise_power , 2) + I)
+    return trunk_bw * log2(1 + sinr)
+
+
+
 
 # ─────────────────────────────────────────────
 #  16-QAM
@@ -944,7 +959,10 @@ class App:
             _, all_opts = find_reuse_factor(ci_lin)
             (N, sect, n_int, ci_ach), num_cells, ch_pc, A_pc = find_best_reuse(
                 all_opts, total_subs, session, rps, trunk, total, blocking)
-            cap = shannon_capacity(trunk, ci_lin)
+            # New - Correct way
+            # Old (wrong)
+            # cap = shannon_capacity(trunk, ci_lin)        # ← Remove this
+            cap = shannon_capacity(trunk, TRANSMIT_POWER, NOISE_POWER, ci_lin)
 
             bits    = generate_bitStream()
             syms    = bits_to_symbols(bits)
