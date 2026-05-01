@@ -64,7 +64,7 @@ def _find_cochannel_cells(i, j):
         q, r = 0, 0
         dq, dr = _HEX_DIRS[d]
         q += i*dq;  r += i*dr
-        dq2, dr2 = _HEX_DIRS[(d+2) % 6]
+        dq2, dr2 = _HEX_DIRS[(d+1) % 6]
         q += j*dq2; r += j*dr2
         cells.append((q, r))
     return cells
@@ -513,6 +513,120 @@ def draw_cluster(N, sectoring, n_interferers, ci_db):
     win.focus_force()
 
 
+def draw_cochannel_map(N, sectoring, n_interferers, ci_db):
+    """
+    Draw the full hex grid highlighting the reference cell and its
+    6 co-channel cells, with sector wedges on each — mirroring flattop.py style
+    but using the pointy-top layout already used in this file.
+    """
+    ij = _get_ij(N)
+    if ij is None:
+        messagebox.showinfo("Info", f"N={N} has no valid (i,j)."); return
+    i, j = ij
+    cochannel_cells = _find_cochannel_cells(i, j)
+    cochannel_set   = set(cochannel_cells)
+
+    # Build waypoints for the i-step arrow (direction 0 only)
+    dq0, dr0 = _HEX_DIRS[0]
+    wp = (i * dq0, i * dr0)
+
+    size = 1.0
+    grid_radius = max(8, int(math.sqrt(N)) + 4)
+
+    sec_pal = {
+        "60":  ['#e74c3c','#e67e22','#f1c40f','#2ecc71','#3498db','#9b59b6'],
+        "120": ['#e74c3c','#3498db','#2ecc71'],
+        "180": ['#e74c3c','#3498db'],
+        "Omni (no sectoring)": ['#4e8ef7'],
+    }
+    sec_colors = sec_pal.get(sectoring, ['#4e8ef7'])
+    ns = {"60":6, "120":3, "180":2}.get(sectoring, 0)
+
+    fig, ax = plt.subplots(figsize=(14, 12))
+    ax.set_aspect('equal'); ax.axis('off')
+    fig.patch.set_facecolor('#f8f9fa')
+
+    # Draw background grid
+    for q in range(-grid_radius, grid_radius + 1):
+        for r in range(-grid_radius, grid_radius + 1):
+            s = -q - r
+            if max(abs(q), abs(r), abs(s)) > grid_radius:
+                continue
+            cx, cy = hex_center(q, r, size)
+
+            if (q, r) == (0, 0):
+                fc, ec, lw, ls = '#ffeb3b', '#d32f2f', 4.5, 'solid'
+            elif (q, r) in cochannel_set:
+                fc, ec, lw, ls = '#ffcc80', '#f57c00', 3.5, 'dashed'
+            else:
+                fc, ec, lw, ls = '#e8eaf6', '#90a4ae', 0.9, 'solid'
+
+            draw_hex_patch(ax, cx, cy, size * 0.97, fc, ec, lw, zorder=1)
+            # redraw with dashed linestyle for co-channel cells
+            if ls == 'dashed':
+                from matplotlib.patches import Polygon as MPoly
+                ax.add_patch(MPoly(
+                    hex_corners_pointy(cx, cy, size * 0.97), closed=True,
+                    facecolor='none', edgecolor=ec,
+                    linewidth=lw, linestyle='dashed', zorder=2))
+
+    # Draw sector wedges on reference + co-channel cells
+    def draw_sectors_on(q, r):
+        cx, cy = hex_center(q, r, size)
+        draw_sector_wedges(ax, cx, cy, size, sectoring, sec_colors, zorder=3)
+
+    draw_sectors_on(0, 0)
+    cx0, cy0 = hex_center(0, 0, size)
+    ax.text(cx0, cy0, "Ref", ha='center', va='center',
+            fontsize=12, fontweight='bold', color='#b71c1c', zorder=6)
+
+    for (cq, cr) in cochannel_cells:
+        draw_sectors_on(cq, cr)
+        ccx, ccy = hex_center(cq, cr, size)
+        ax.text(ccx, ccy - size * 0.30, "co-ch",
+                ha='center', va='center',
+                fontsize=8, fontweight='bold', color='#e65100', zorder=6)
+
+    # i-step arrow (blue) and j-step arrow (purple) for direction 0
+    x0, y0   = hex_center(0, 0, size)
+    xw, yw   = hex_center(wp[0], wp[1], size)
+    xc, yc   = hex_center(cochannel_cells[0][0], cochannel_cells[0][1], size)
+
+    arr = dict(arrowstyle="-|>", lw=2.0, mutation_scale=18)
+    if i > 0:
+        ax.annotate("", xy=(xw, yw), xytext=(x0, y0),
+                    arrowprops=dict(**arr, color='#1565c0'), zorder=7)
+        ax.text((x0+xw)/2 + size*0.15, (y0+yw)/2 + size*0.15,
+                f"i={i}", fontsize=11, fontweight='bold', color='#1565c0',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85), zorder=8)
+    if j > 0:
+        ax.annotate("", xy=(xc, yc), xytext=(xw, yw),
+                    arrowprops=dict(**arr, color='#6a1b9a'), zorder=7)
+        ax.text((xw+xc)/2 + size*0.15, (yw+yc)/2 + size*0.15,
+                f"j={j}", fontsize=11, fontweight='bold', color='#6a1b9a',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85), zorder=8)
+
+    # Sector legend
+    if ns > 0:
+        handles = [plt.Rectangle((0,0),1,1, fc=sec_colors[k], alpha=0.88)
+                   for k in range(ns)]
+        ax.legend(handles, [f'Sector {k+1}' for k in range(ns)],
+                  loc='upper right', fontsize=10, framealpha=0.92,
+                  title='Sectors', title_fontsize=10)
+
+    # Title / info
+    ci_str = f"{ci_db:.2f}" if ci_db is not None else "N/A"
+    ax.set_title(
+        f"Co-channel Map  |  N={N}  ({sectoring})  |  "
+        f"i={i}, j={j}  |  n={n_interferers}  |  C/I≈{ci_str} dB",
+        fontsize=13, fontweight='bold', pad=18, color='#263238')
+
+    lim = grid_radius * size * 1.8
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+    plt.tight_layout()
+    plt.show()
+
+
 # ─────────────────────────────────────────────
 #  16-QAM
 # ─────────────────────────────────────────────
@@ -812,7 +926,8 @@ class App:
         ttk.Button(inp, text="Transmit Image (Bonus)",
                    command=self.run_image).grid(row=len(fields)+1, column=0,
                    columnspan=3, pady=(6, 0), sticky="ew")
-
+        ttk.Button(btn_frame, text="Show Co-channel Map",
+           command=self.show_cochannel_map).pack(side=tk.LEFT, fill=tk.X, expand=True)
         # ── Results panel ────────────────────────
         res = ttk.LabelFrame(main, text="Results", padding=12)
         res.grid(row=1, column=1, sticky="nsew")
@@ -1024,6 +1139,19 @@ class App:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    def show_cochannel_map(self):
+        if self.last_ci is None:
+            messagebox.showinfo("Info", "Run the simulation first.")
+            return
+        try:
+            (N, sect, n_int, ci_ach), _ = find_reuse_factor(self.last_ci)
+            ci_db = 10 * math.log10(ci_ach)
+            self.status.set("Drawing co-channel map...")
+            self.root.update()
+            draw_cochannel_map(N, sect, n_int, ci_db)
+            self.status.set("Co-channel map shown.")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
     def plot_tx(self):
         if self.last_ci is None:
             messagebox.showinfo("Info", "Run the simulation first.")
