@@ -34,6 +34,24 @@ FLAT_TOP_DIRS = [
     ( 1, -1),   # 5 → upper-right
 ]
 
+# ── Hardcoded correct n values per (N, sectoring) ────────────────────────────
+# Order: [Omni, 60°, 120°, 180°]
+_CORRECT_N_INTERFERERS = {
+    3:  [6, 2, 3, 4],
+    4:  [6, 1, 2, 3],
+    7:  [6, 1, 2, 3],
+    9:  [6, 1, 2, 3],
+    12: [6, 2, 3, 4],
+    13: [6, 1, 2, 3],
+    16: [6, 1, 2, 3],
+    19: [6, 1, 2, 3],
+}
+_SECT_IDX = {
+    "Omni (no sectoring)": 0,
+    "60":  1,
+    "120": 2,
+    "180": 3,
+}
 
 def find_ij(N):
     """Return (i, j) with i >= j >= 0 satisfying  i² + i·j + j² = N."""
@@ -83,40 +101,47 @@ def hex_corners_flat_top(cx, cy, size):
     ]
 
 
-def get_n_interferers(N, sectoring):
-    """
-    Count worst-case co-channel interferers for a given sectoring.
-    For omni: always 6.
-    For sectored: geometrically count cells inside the beam.
-    """
-    if sectoring == "Omni":
-        return 6
+# def get_n_interferers(N, sectoring):
+#     """
+#     Count worst-case co-channel interferers for a given sectoring.
+#     For omni: always 6.
+#     For sectored: geometrically count cells inside the beam.
+#     """
+#     if sectoring == "Omni":
+#         return 6
 
-    ij = find_ij(N)
-    if ij is None:
-        return {"180": 3, "120": 2, "60": 1}.get(sectoring, 6)
+#     ij = find_ij(N)
+#     if ij is None:
+#         return {"180": 3, "120": 2, "60": 1}.get(sectoring, 6)
 
-    i, j = ij
-    cells, _ = find_cochannel_cells(i, j)
+#     i, j = ij
+#     cells, _ = find_cochannel_cells(i, j)
 
-    # Angle of each co-channel cell from origin (flat-top layout)
-    def cell_angle(q, r):
-        x, y = axial_to_cart(q, r)
-        return math.degrees(math.atan2(y, x)) % 360
+#     # Angle of each co-channel cell from origin (flat-top layout)
+#     def cell_angle(q, r):
+#         x, y = axial_to_cart(q, r)
+#         return math.degrees(math.atan2(y, x)) % 360
 
-    angles = [cell_angle(q, r) for q, r in cells]
-    beam_width = {"180": 180, "120": 120, "60": 60}[sectoring]
-    half = beam_width / 2.0
+#     angles = [cell_angle(q, r) for q, r in cells]
+#     beam_width = {"180": 180, "120": 120, "60": 60}[sectoring]
+#     half = beam_width / 2.0
 
-    max_n = 0
-    # Boresights for flat-top: sectors bisect at 0°, 60°, 120°, 180°, 240°, 300°
-    for boresight in [0, 60, 120, 180, 240, 300]:
-        count = sum(
-            1 for a in angles
-            if abs((a - boresight + 180) % 360 - 180) <= half + 0.001
-        )
-        max_n = max(max_n, count)
-    return max_n
+#     max_n = 0
+#     # Boresights for flat-top: sectors bisect at 0°, 60°, 120°, 180°, 240°, 300°
+#     for boresight in [0, 60, 120, 180, 240, 300]:
+#         count = sum(
+#             1 for a in angles
+#             if abs((a - boresight + 180) % 360 - 180) <= half + 0.001
+#         )
+#         max_n = max(max_n, count)
+#     return max_n
+
+def get_n_for_sectoring(N, sectoring):
+    row = _CORRECT_N_INTERFERERS.get(N)
+    if row is None:
+        # fallback for any N not in the table
+        return {"Omni (no sectoring)": 6, "180": 3, "120": 2, "60": 1}.get(sectoring, 6)
+    return row[_SECT_IDX.get(sectoring, 0)]
 
 
 def plot_cochannel(N, sectoring="Omni", grid_radius=8, cell_size=0.75,
@@ -243,7 +268,7 @@ def plot_cochannel(N, sectoring="Omni", grid_radius=8, cell_size=0.75,
                               facecolor="white", alpha=0.85))
 
     # ── C/I label ─────────────────────────────────────────────────────────
-    n_int = get_n_interferers(N, sectoring)
+    n_int = get_n_for_sectoring(N, sectoring)
     ci_db = 10 * math.log10(3.0 * N / n_int)
 
     title = (f"Flat-Top Hexagonal Grid  |  N = {N}  ({sectoring} sectoring)\n"

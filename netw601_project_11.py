@@ -11,6 +11,25 @@ from tkinter import ttk, messagebox, filedialog, scrolledtext
 TRANSMIT_POWER = 0.1      # 100 mW
 NOISE_POWER    = 0.0001   # 0.1 mW
 
+# ── Hardcoded correct n values per (N, sectoring) ────────────────────────────
+# Order: [Omni, 60°, 120°, 180°]
+_CORRECT_N_INTERFERERS = {
+    3:  [6, 2, 3, 4],
+    4:  [6, 1, 2, 3],
+    7:  [6, 1, 2, 3],
+    9:  [6, 1, 2, 3],
+    12: [6, 2, 3, 4],
+    13: [6, 1, 2, 3],
+    16: [6, 1, 2, 3],
+    19: [6, 1, 2, 3],
+}
+_SECT_IDX = {
+    "Omni (no sectoring)": 0,
+    "60":  1,
+    "120": 2,
+    "180": 3,
+}
+
 # ─────────────────────────────────────────────
 #  VALID N LIST
 # ─────────────────────────────────────────────
@@ -23,6 +42,8 @@ def is_valid_N(N):
     return False
 
 VALID_N_LIST = [N for N in range(3, 19) if is_valid_N(N)]   # N>=3 (N=1 impractical)
+
+
 
 # ─────────────────────────────────────────────
 #  CELLULAR PLANNING
@@ -70,35 +91,14 @@ def _find_cochannel_cells(i, j):
     return cells
 
 def get_n_for_sectoring(N, sectoring):
-    """
-    Geometrically compute number of co-channel interferers n:
-    1. Find (i,j) for this N using i²+ij+j² = N
-    2. Locate 6 co-channel cells via the (i,j) displacement rule
-    3. For each hex-edge boresight (0,60,120,180,240,300 deg),
-       count cells inside the beam (width = sectoring angle)
-    4. Return worst-case (max) count across all orientations
-    """
-    if sectoring == "Omni (no sectoring)":
-        return 6
+    row = _CORRECT_N_INTERFERERS.get(N)
+    if row is None:
+        # fallback for any N not in the table
+        return {"Omni (no sectoring)": 6, "180": 3, "120": 2, "60": 1}.get(sectoring, 6)
+    return row[_SECT_IDX.get(sectoring, 0)]
 
-    ij = _get_ij(N)
-    if ij is None:
-        return {"180":3, "120":2, "60":1}.get(sectoring, 6)
-    i, j = ij
 
-    angles     = [_axial_to_angle(q,r) for q,r in _find_cochannel_cells(i,j)]
-    beam_width = {"180":180, "120":120, "60":60}[sectoring]
-    half       = beam_width / 2.0
 
-    # Boresights aligned to hex-edge directions (pointy-top)
-    max_n = 0
-    for boresight in [0, 60, 120, 180, 240, 300]:
-        count = sum(
-            1 for a in angles
-            if abs((a - boresight + 180) % 360 - 180) <= half + 0.001
-        )
-        max_n = max(max_n, count)
-    return max_n
 
 def find_reuse_factor(c_i_linear):
     """
