@@ -68,11 +68,7 @@ def _get_ij(N):
                 return i, j
     return None
 
-def _axial_to_angle(q, r):
-    """Angle in degrees from origin to hex cell (q,r) in pointy-top layout."""
-    x = math.sqrt(3)*q + math.sqrt(3)/2*r
-    y = 1.5 * r
-    return math.degrees(math.atan2(y, x)) % 360
+
 
 def _find_cochannel_cells(i, j):
     """
@@ -180,8 +176,7 @@ def find_best_reuse(all_options, total_subscribers, user_session_time,
     return best_result, best_cells, best_ch_pc, best_A_pc
 
 
-# def shannon_capacity(channel_bandwidth_hz, snr_linear):
-#     return channel_bandwidth_hz * log2(1 + snr_linear)
+
 
 # CORRECT shannon capacity according to the project note 
 def shannon_capacity(trunk_bw, transmit_power, noise_power, c_i_linear):
@@ -191,8 +186,8 @@ def shannon_capacity(trunk_bw, transmit_power, noise_power, c_i_linear):
     Shannon capacity treating interference as noise (per the project note).
     SINR = C / (sigma^2 + I),  where I = C / (C/I)_min
     """
-    I = transmit_power / c_i_linear      # interference power
-    sinr = transmit_power / (math.pow(noise_power , 2) + I)
+    I = transmit_power / c_i_linear  if c_i_linear > 0 else 0.0    # interference power
+    sinr = transmit_power / (noise_power+ I)
     return trunk_bw * log2(1 + sinr)
 
 
