@@ -514,14 +514,14 @@ class App:
         left.columnconfigure(1, weight=1)
 
         fields = [
-            ("Length (m)",              "length",   "2000"),
-            ("Width (m)",               "width",    "2000"),
-            ("User density (users/km²)","density",  "200"),
-            ("Min C/I (dB)",            "ci",       "18"),
-            ("Session time (s)",        "session",  "5"),
-            ("Requests / second",       "rps",      "0.01"),
-            ("Trunk bandwidth (Hz)",    "trunk",    "200000"),
-            ("Total bandwidth (Hz)",    "total",    "5000000"),
+            ("Length (m)",              "length",   "5000"),
+            ("Width (m)",               "width",    "5000"),
+            ("User density (users/km²)","density",  "1000"),
+            ("Min C/I (dB)",            "ci",       "10"),
+            ("Session time (s)",        "session",  "0.0069"),
+            ("Requests / second",       "rps",      "1"),
+            ("Trunk bandwidth (Hz)",    "trunk",    "200"),
+            ("Total bandwidth (Hz)",    "total",    "20000"),
             ("Blocking probability",    "blocking", "0.02"),
         ]
         self.entries    = {}
